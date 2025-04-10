@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Light Party</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+        }
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="instructions">Move your mouse around to create lights</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Initialize the scene, camera, and renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.OrthographicCamera(
+            window.innerWidth / -2, window.innerWidth / 2,
+            window.innerHeight / 2, window.innerHeight / -2,
+            0.1, 1000
+        );
+        
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            alpha: true 
+        });
+        
+        // Enable colored lights
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        
+        // Set camera position (using orthographic camera to make positioning more intuitive)
+        camera.position.z = 10;
+        
+        // Add ambient light to make colors more visible
+        const ambientLight = new THREE.AmbientLight(0x333333);
+        scene.add(ambientLight);
+        
+        // Create array to hold lights
+        const lights = [];
+        const MAX_LIGHTS = 60; // Increased for smoother trails
+        
+        // Track mouse position
+        let mouseX = 0;
+        let mouseY = 0;
+        let mouseSpeed = 0;
+        let lastMousePosition = { x: 0, y: 0 };
+        let lastCreationTime = 0;
+        
+        // Maximum light diameter in pixels
+        const MAX_LIGHT_DIAMETER = 500;
+        
+        // Rainbow color cycle
+        let colorCycle = 0;
+        const COLOR_SPEED = 0.005;
+        
+        // Velocity tracking for fluid movement
+        let velocityX = 0;
+        let velocityY = 0;
+        const MOMENTUM = 0.9; // Higher value = more persistence in direction
+        
+        window.addEventListener('mousemove', (event) => {
+            // Store actual screen coordinates
+            mouseX = event.clientX;
+            mouseY = event.clientY;
+            
+            // Calculate mouse speed for dynamic light size
+            const dx = event.clientX - lastMousePosition.x;
+            const dy = event.clientY - lastMousePosition.y;
+            mouseSpeed = Math.min(10, Math.sqrt(dx * dx + dy * dy));
+            
+            // Update velocity with some momentum for smoother movement
+            velocityX = velocityX * MOMENTUM + dx * (1 - MOMENTUM);
+            velocityY = velocityY * MOMENTUM + dy * (1 - MOMENTUM);
+            
+            // Update last mouse position
+            lastMousePosition.x = event.clientX;
+            lastMousePosition.y = event.clientY;
+            
+            // Create lights at a rate proportional to mouse speed
+            const now = Date.now();
+            const minTimeBetweenLights = mouseSpeed > 5 ? 10 : 30; // ms
+            
+            if (now - lastCreationTime > minTimeBetweenLights) {
+                createLight();
+                lastCreationTime = now;
+                
+                // For faster movements, create multiple lights for smoother trail
+                if (mouseSpeed > 7) {
+                    // Create a few extras along the movement path
+                    for (let i = 1; i <= 3; i++) {
+                        const fraction = i / 4;
+                        const offsetX = -velocityX * fraction;
+                        const offsetY = -velocityY * fraction;
+                        createLight(offsetX, offsetY);
+                    }
+                }
+            }
+        });
+        
+        // Function to create a new light
+        function createLight(offsetX = 0, offsetY = 0) {
+            // Advance the color cycle for rainbow effect
+            colorCycle += COLOR_SPEED + Math.random() * 0.01;
+            if (colorCycle > 1) colorCycle -= 1;
+            
+            // Generate vibrant rainbow color with HSL for better control
+            const hue = (colorCycle * 360) + Math.random() * 60 - 30; // Base hue + some randomness
+            const saturation = 85 + Math.random() * 15; // 85-100%
+            const lightness = 55 + Math.random() * 15;  // 55-70%
+            
+            // Convert HSL color to hex for Three.js (more reliable than direct HSL)
+            const hexColor = hslToHex(hue % 360, saturation, lightness);
+            const color = new THREE.Color(hexColor);
+            
+            // Convert mouse coordinates to Three.js scene coordinates
+            const x = (mouseX + offsetX) - window.innerWidth / 2;
+            const y = -((mouseY + offsetY) - window.innerHeight / 2);
+            
+            // Calculate light size based on mouse speed, but cap it
+            const maxRadius = MAX_LIGHT_DIAMETER / 2; // Convert diameter to radius
+            const baseSize = 25 + mouseSpeed * 3; // Base size in pixels
+            const size = Math.min(baseSize, maxRadius);
+            
+            // Create a sprite for the glow effect
+            const texture = createLightTexture(256, color);
+            const spriteMaterial = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true,
+                blending: THREE.AdditiveBlending, // Makes overlapping lights brighter
+                color: color // Explicitly set the color on the material
+            });
+            
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.set(x, y, 0);
+            
+            // Scale sprite based on desired size
+            sprite.scale.set(size * 2, size * 2, 1);
+            
+            // Add sprite to scene and to our array
+            scene.add(sprite);
+            
+            // Create a soft point light with the same color
+            const intensity = 1.5; // Increased intensity for more visible color
+            const pointLight = new THREE.PointLight(color, intensity, size * 3);
+            pointLight.position.set(x, y, 0);
+            scene.add(pointLight);
+            
+            // Store light with its creation time and lifespan
+            lights.push({
+                sprite: sprite,
+                light: pointLight,
+                creationTime: Date.now(),
+                lifespan: 2000 + Math.random() * 2000, // 2-4 seconds
+                size: size,
+                x: x,
+                y: y,
+                color: color,
+                // Store initial velocity for fluid movement
+                vx: velocityX * 0.1 + (Math.random() - 0.5) * 2,
+                vy: velocityY * 0.1 + (Math.random() - 0.5) * 2,
+                // Random factors for individual light behavior
+                disperseFactor: Math.random() * 0.4 + 0.2,
+                wobbleFactor: Math.random() * 0.3 + 0.1,
+                wobbleSpeed: Math.random() * 0.02 + 0.01
+            });
+            
+            // Remove oldest lights if we have too many
+            if (lights.length > MAX_LIGHTS) {
+                const oldest = lights.shift();
+                scene.remove(oldest.sprite);
+                scene.remove(oldest.light);
+            }
+        }
+        
+        // Helper function to convert HSL to Hex color (more reliable for Three.js)
+        function hslToHex(h, s, l) {
+            s /= 100;
+            l /= 100;
+            
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = l - c/2;
+            
+            let r, g, b;
+            if (h >= 0 && h < 60) {
+                [r, g, b] = [c, x, 0];
+            } else if (h >= 60 && h < 120) {
+                [r, g, b] = [x, c, 0];
+            } else if (h >= 120 && h < 180) {
+                [r, g, b] = [0, c, x];
+            } else if (h >= 180 && h < 240) {
+                [r, g, b] = [0, x, c];
+            } else if (h >= 240 && h < 300) {
+                [r, g, b] = [x, 0, c];
+            } else {
+                [r, g, b] = [c, 0, x];
+            }
+            
+            const rHex = Math.round((r + m) * 255).toString(16).padStart(2, '0');
+            const gHex = Math.round((g + m) * 255).toString(16).padStart(2, '0');
+            const bHex = Math.round((b + m) * 255).toString(16).padStart(2, '0');
+            
+            return '#' + rHex + gHex + bHex;
+        }
+        
+        // Function to create a circular, soft gradient texture for the light
+        function createLightTexture(size, color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            
+            const context = canvas.getContext('2d');
+            const gradient = context.createRadialGradient(
+                size/2, size/2, 0,
+                size/2, size/2, size/2
+            );
+            
+            // Get color components
+            const r = Math.floor(color.r * 255);
+            const g = Math.floor(color.g * 255);
+            const b = Math.floor(color.b * 255);
+            
+            // Create a very soft gradient for glow effect with more steps for smoother appearance
+            gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 1)`);
+            gradient.addColorStop(0.2, `rgba(${r}, ${g}, ${b}, 0.8)`);
+            gradient.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, 0.5)`);
+            gradient.addColorStop(0.7, `rgba(${r}, ${g}, ${b}, 0.2)`);
+            gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+            
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, size, size);
+            
+            // Add some noise texture for more interesting glow
+            addNoiseToCanvas(canvas, context, 0.06);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+        
+        // Add subtle noise to the canvas to create more organic looking lights
+        function addNoiseToCanvas(canvas, context, intensity) {
+            const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            
+            for (let i = 0; i < data.length; i += 4) {
+                // Only add noise to semi-transparent pixels (the glow)
+                if (data[i+3] > 0 && data[i+3] < 255) {
+                    const noise = (Math.random() - 0.5) * intensity * data[i+3];
+                    data[i] = Math.min(255, Math.max(0, data[i] + noise));
+                    data[i+1] = Math.min(255, Math.max(0, data[i+1] + noise));
+                    data[i+2] = Math.min(255, Math.max(0, data[i+2] + noise));
+                }
+            }
+            
+            context.putImageData(imageData, 0, 0);
+        }
+        
+        // Function to update light opacity based on lifetime
+        function updateLights() {
+            const now = Date.now();
+            
+            for (let i = lights.length - 1; i >= 0; i--) {
+                const lightObj = lights[i];
+                const age = now - lightObj.creationTime;
+                
+                // If light's lifetime is over, remove it
+                if (age > lightObj.lifespan) {
+                    scene.remove(lightObj.sprite);
+                    scene.remove(lightObj.light);
+                    lights.splice(i, 1);
+                    continue;
+                }
+                
+                // Calculate life progress (0 to 1)
+                const lifeProgress = age / lightObj.lifespan;
+                const opacity = 1 - lifeProgress;
+                
+                // Update sprite opacity
+                if (lightObj.sprite.material) {
+                    lightObj.sprite.material.opacity = opacity;
+                }
+                
+                // More dramatic disperse effect as the light ages
+                const dispersionFactor = lightObj.disperseFactor * lifeProgress * 1.5;
+                const wobbleAmount = Math.sin(now * lightObj.wobbleSpeed) * lightObj.wobbleFactor * (1 + lifeProgress);
+                
+                // Update position with fluid movement - lights disperse more as they age
+                lightObj.vx += (Math.random() - 0.5) * dispersionFactor;
+                lightObj.vy += (Math.random() - 0.5) * dispersionFactor;
+                
+                // Add some wobble for organic fluid motion
+                lightObj.sprite.position.x += lightObj.vx + wobbleAmount;
+                lightObj.sprite.position.y += lightObj.vy + wobbleAmount;
+                
+                // Scale up slightly as it disperses for more dramatic effect
+                const scaleChange = 1 + lifeProgress * 0.3;
+                const newScale = lightObj.size * 2 * scaleChange;
+                lightObj.sprite.scale.set(newScale, newScale, 1);
+                
+                // Update point light as well
+                lightObj.light.position.copy(lightObj.sprite.position);
+                lightObj.light.intensity = opacity * 1.2; // Increased intensity multiplier
+            }
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            
+            // Update orthographic camera
+            camera.left = width / -2;
+            camera.right = width / 2;
+            camera.top = height / 2;
+            camera.bottom = height / -2;
+            camera.updateProjectionMatrix();
+            
+            renderer.setSize(width, height);
+        });
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            updateLights();
+            
+            // Render the scene
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>
