@@ -12,8 +12,4 @@ Using ThreeJS, turn index.html into a light simulator. When you wave your mouse 
 ---
 
 Let's add some more random rainbow colors to the lighting so it's not just white, and also make the trail a bit smoother (right now it's a little stiff). Maybe making it feel more "fluid" would be better, like if it dispersed a bit more.
-
----
-
-I added the word "GLOW" to the background, as you can see. Can you make the lights a little slower to disperse, and make it seem like the letters are a magnet? Remember to keep things fluid, maybe less bouncing.
 ```
