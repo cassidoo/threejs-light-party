@@ -9,6 +9,7 @@
             margin: 0;
             overflow: hidden;
             background-color: #000;
+            touch-action: none; /* Prevent scrolling/zooming on touch */
         }
         canvas {
             display: block;
@@ -24,7 +25,7 @@
     </style>
 </head>
 <body>
-    <div class="instructions">Move your mouse around to create lights</div>
+    <div class="instructions">Move your mouse or finger to create lights</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         // Initialize the scene, camera, and renderer
@@ -57,12 +58,13 @@
         const lights = [];
         const MAX_LIGHTS = 60; // Increased for smoother trails
         
-        // Track mouse position
-        let mouseX = 0;
-        let mouseY = 0;
-        let mouseSpeed = 0;
-        let lastMousePosition = { x: 0, y: 0 };
+        // Track pointer (mouse/touch) position and state
+        let pointerX = 0;
+        let pointerY = 0;
+        let pointerSpeed = 0;
+        let lastPointerPosition = { x: 0, y: 0 };
         let lastCreationTime = 0;
+        let isPointerDown = false; // Track if pointer is active (mouse button down or touch active)
         
         // Maximum light diameter in pixels
         const MAX_LIGHT_DIAMETER = 500;
@@ -75,35 +77,36 @@
         let velocityX = 0;
         let velocityY = 0;
         const MOMENTUM = 0.9; // Higher value = more persistence in direction
-        
-        window.addEventListener('mousemove', (event) => {
+
+        // Common function to handle both mouse and touch input
+        function handlePointerMove(x, y) {
             // Store actual screen coordinates
-            mouseX = event.clientX;
-            mouseY = event.clientY;
+            pointerX = x;
+            pointerY = y;
             
-            // Calculate mouse speed for dynamic light size
-            const dx = event.clientX - lastMousePosition.x;
-            const dy = event.clientY - lastMousePosition.y;
-            mouseSpeed = Math.min(10, Math.sqrt(dx * dx + dy * dy));
+            // Calculate pointer speed for dynamic light size
+            const dx = x - lastPointerPosition.x;
+            const dy = y - lastPointerPosition.y;
+            pointerSpeed = Math.min(10, Math.sqrt(dx * dx + dy * dy));
             
             // Update velocity with some momentum for smoother movement
             velocityX = velocityX * MOMENTUM + dx * (1 - MOMENTUM);
             velocityY = velocityY * MOMENTUM + dy * (1 - MOMENTUM);
             
-            // Update last mouse position
-            lastMousePosition.x = event.clientX;
-            lastMousePosition.y = event.clientY;
+            // Update last pointer position
+            lastPointerPosition.x = x;
+            lastPointerPosition.y = y;
             
-            // Create lights at a rate proportional to mouse speed
+            // Create lights at a rate proportional to pointer speed
             const now = Date.now();
-            const minTimeBetweenLights = mouseSpeed > 5 ? 10 : 30; // ms
+            const minTimeBetweenLights = pointerSpeed > 5 ? 10 : 30; // ms
             
             if (now - lastCreationTime > minTimeBetweenLights) {
                 createLight();
                 lastCreationTime = now;
                 
                 // For faster movements, create multiple lights for smoother trail
-                if (mouseSpeed > 7) {
+                if (pointerSpeed > 7) {
                     // Create a few extras along the movement path
                     for (let i = 1; i <= 3; i++) {
                         const fraction = i / 4;
@@ -113,7 +116,50 @@
                     }
                 }
             }
+        }
+        
+        // Mouse event listeners
+        window.addEventListener('mousemove', (event) => {
+            handlePointerMove(event.clientX, event.clientY);
         });
+
+        // Touch event listeners
+        window.addEventListener('touchstart', (event) => {
+            event.preventDefault(); // Prevent default touch behaviors
+            isPointerDown = true;
+            if (event.touches.length > 0) {
+                const touch = event.touches[0];
+                // Initialize position without creating a light
+                lastPointerPosition.x = touch.clientX;
+                lastPointerPosition.y = touch.clientY;
+                pointerX = touch.clientX;
+                pointerY = touch.clientY;
+                // Create initial light
+                createLight();
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (event) => {
+            event.preventDefault(); // Prevent scrolling
+            if (isPointerDown && event.touches.length > 0) {
+                const touch = event.touches[0];
+                handlePointerMove(touch.clientX, touch.clientY);
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchend', (event) => {
+            event.preventDefault();
+            isPointerDown = false;
+            // Reset velocity when touch ends
+            velocityX = 0;
+            velocityY = 0;
+        }, { passive: false });
+
+        window.addEventListener('touchcancel', (event) => {
+            isPointerDown = false;
+            velocityX = 0;
+            velocityY = 0;
+        }, { passive: false });
         
         // Function to create a new light
         function createLight(offsetX = 0, offsetY = 0) {
@@ -130,13 +176,13 @@
             const hexColor = hslToHex(hue % 360, saturation, lightness);
             const color = new THREE.Color(hexColor);
             
-            // Convert mouse coordinates to Three.js scene coordinates
-            const x = (mouseX + offsetX) - window.innerWidth / 2;
-            const y = -((mouseY + offsetY) - window.innerHeight / 2);
+            // Convert pointer coordinates to Three.js scene coordinates
+            const x = (pointerX + offsetX) - window.innerWidth / 2;
+            const y = -((pointerY + offsetY) - window.innerHeight / 2);
             
-            // Calculate light size based on mouse speed, but cap it
+            // Calculate light size based on pointer speed, but cap it
             const maxRadius = MAX_LIGHT_DIAMETER / 2; // Convert diameter to radius
-            const baseSize = 25 + mouseSpeed * 3; // Base size in pixels
+            const baseSize = 25 + pointerSpeed * 3; // Base size in pixels
             const size = Math.min(baseSize, maxRadius);
             
             // Create a sprite for the glow effect
